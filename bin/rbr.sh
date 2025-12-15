@@ -12,7 +12,7 @@ RBR_VERSION="4.3"
 RBR_ROOT="." # Always use the current working directory in v4.x
 
 # --- Configuration (Modify these paths if needed) ---
-CLUSTER_SUMMARY_SCRIPT="${CLUSTER_SUMMARY_SCRIPT:-./data/cluster-summary.sh}"
+CLUSTER_SUMMARY_SCRIPT="${CLUSTER_SUMMARY_SCRIPT:-/var/rbr/data/cluster-summary.sh}"
 GEMINI_CMD="${GEMINI_CMD:-gemini}"
 
 # ---------------- logging ----------------
