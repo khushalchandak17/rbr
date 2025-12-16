@@ -55,58 +55,24 @@ vi ~/.gemini/settings.json
 
 C. Paste Configuration Add the following configuration, ensuring the path matches your installation:
 ```
-JSON
-
 {
   "mcpServers": {
-    "cluster_bundle_debugger": {
+    "test_server": {
       "command": "/usr/bin/python3",
-      "args": ["/var/rbr/ai/cluster_bundle_debugger.py"],
-      "transport": "stdio",
-      "timeout": "120s",
-      "tools": {
-        "auto_diagnose": {
-          "description": "Automatically runs a full diagnostic analysis on a Kubernetes bundle.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "bundle": {
-                "type": "string",
-                "description": "The absolute path to the root of the extracted bundle directory."
-              },
-              "distro": {
-                "type": "string",
-                "description": "The Kubernetes distribution (e.g., 'k3s', 'rke2')."
-              }
-            },
-            "required": ["bundle"]
-          }
-        },
-        "read_file": {
-          "description": "Reads a specific file within the bundle path safely.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "bundle": { "type": "string" },
-              "file": { "type": "string", "description": "Relative path to file (e.g., 'rke2/podlogs/...')" }
-            },
-            "required": ["bundle", "file"]
-          }
-        },
-        "list_files": {
-          "description": "Lists all files recursively in the bundle.",
-          "parameters": {
-            "type": "object",
-            "properties": { "bundle": { "type": "string" } }
-          }
-        }
-      }
+      "args": [
+        "-u",
+        "/Users/khushalchandak/mcp_test.py"
+      ],
+      "transport": "stdio"
     }
   },
   "security": {
     "auth": {
       "selectedType": "oauth-personal"
-    }
+    },
+    "alwaysAllow": [
+      "test_server"
+    ]
   }
 }
 ```
@@ -146,6 +112,8 @@ Let the AI analyze the cluster for you.
 
 ```
 # Run the AI Root Cause Analysis
-rbr cs ai
+rbr ai cs
+rbr ai pods
+rbr ai events
 ```
 
