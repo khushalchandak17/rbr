@@ -4,44 +4,16 @@ import json
 import os
 import subprocess
 
-# --- PARANOID CONFIGURATION ---
-MAX_LIST_ITEMS = 15       # Limit lists (e.g., pods) to 15 items
-MAX_CHAR_LIMIT = 8000     # Limit file reads to ~8KB characters
-MAX_LINE_LENGTH = 300     # Truncate individual log lines
+# --- CONFIGURATION ---
+MAX_LIST_ITEMS = 15
+MAX_CHAR_LIMIT = 8000
+MAX_LINE_LENGTH = 300
 
 # =====================================================
-# Utility: Send Response
+# CORE LOGIC (Truncation & Analysis)
 # =====================================================
-def log_debug(msg):
-    sys.stderr.write(f"[MCP-DEBUG] {msg}\n")
-    sys.stderr.flush()
-
-def send(response):
-    try:
-        json_str = json.dumps(response)
-        if len(json_str) > 100000:
-            log_debug(f"WARNING: Large response ({len(json_str)} bytes)")
-        sys.stdout.write(json_str + "\n")
-        sys.stdout.flush()
-    except Exception as e:
-        sys.stderr.write(f"JSON Dump Error: {e}\n")
-
-# =====================================================
-# Helper: Aggressive Truncation
-# =====================================================
-def truncate_line(line):
-    if len(line) > MAX_LINE_LENGTH:
-        return line[:MAX_LINE_LENGTH] + "...[TRUNCATED]"
-    return line
-
-def truncate_list(data_list):
-    cleaned_list = [truncate_line(str(item)) for item in data_list]
-    if len(cleaned_list) > MAX_LIST_ITEMS:
-        remaining = len(cleaned_list) - MAX_LIST_ITEMS
-        return cleaned_list[:MAX_LIST_ITEMS] + [f"... ({remaining} more items truncated)"]
-    return cleaned_list
-
 def safe_read(filepath):
+    """Reads a file with a hard character cap."""
     if not os.path.exists(filepath):
         return None
     try:
@@ -63,31 +35,25 @@ def safe_read(filepath):
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
-# =====================================================
-# TOOL: Core Functions
-# =====================================================
-def list_all(bundle):
+def truncate_list(data_list):
+    """Truncates list items and list length."""
+    cleaned = [str(x)[:MAX_LINE_LENGTH] + ("..." if len(str(x)) > MAX_LINE_LENGTH else "") for x in data_list]
+    if len(cleaned) > MAX_LIST_ITEMS:
+        rem = len(cleaned) - MAX_LIST_ITEMS
+        return cleaned[:MAX_LIST_ITEMS] + [f"... ({rem} more items truncated)"]
+    return cleaned
+
+def list_all_files(bundle):
     result = []
     for root, _, files in os.walk(bundle):
-        if len(result) > MAX_LIST_ITEMS: break 
+        if len(result) > MAX_LIST_ITEMS: break
         for f in files:
-            rel = os.path.relpath(os.path.join(root, f), bundle)
-            result.append(rel)
+            result.append(os.path.relpath(os.path.join(root, f), bundle))
     return truncate_list(result)
 
-def read_file(args):
-    bundle = args.get("bundle", ".")
-    file = args.get("file")
-    full = os.path.join(bundle, file)
-    content = safe_read(full)
-    if content is None: return {"error": f"File not found: {full}"}
-    return {"file": file, "content": content}
-
-def analyze_events(args):
-    bundle = args.get("bundle")
-    distro = args.get("distro", "k3s")
-    events_file = os.path.join(bundle, distro, "kubectl", "events")
-    raw = safe_read(events_file) or ""
+def analyze_events(bundle, distro):
+    path = os.path.join(bundle, distro, "kubectl", "events")
+    raw = safe_read(path) or ""
     lines = raw.splitlines()
     warnings = [l for l in lines if "Warning" in l or "Failed" in l]
     critical = [l for l in lines if "BackOff" in l or "Crashed" in l]
@@ -97,11 +63,9 @@ def analyze_events(args):
         "critical_sample": truncate_list(critical)
     }
 
-def analyze_pods(args):
-    bundle = args.get("bundle")
-    distro = args.get("distro", "k3s")
-    pods_file = os.path.join(bundle, distro, "kubectl", "pods")
-    raw = safe_read(pods_file) or ""
+def analyze_pods(bundle, distro):
+    path = os.path.join(bundle, distro, "kubectl", "pods")
+    raw = safe_read(path) or ""
     lines = raw.splitlines()
     crash = [l for l in lines if "Crash" in l or "Error" in l]
     pending = [l for l in lines if "Pending" in l]
@@ -111,11 +75,9 @@ def analyze_pods(args):
         "pending_sample": truncate_list(pending)
     }
 
-def analyze_nodes(args):
-    bundle = args.get("bundle")
-    distro = args.get("distro", "k3s")
-    nodes_file = os.path.join(bundle, distro, "kubectl", "nodes")
-    raw = safe_read(nodes_file) or ""
+def analyze_nodes(bundle, distro):
+    path = os.path.join(bundle, distro, "kubectl", "nodes")
+    raw = safe_read(path) or ""
     lines = raw.splitlines()
     notready = [l for l in lines if "NotReady" in l]
     return {
@@ -123,38 +85,139 @@ def analyze_nodes(args):
         "not_ready_nodes": truncate_list(notready)
     }
 
-def auto_diagnose(args):
-    bundle = args.get("bundle", ".")
-    distro = args.get("distro", "k3s")
+def auto_diagnose(bundle, distro):
     return {
-        "events": analyze_events({"bundle": bundle, "distro": distro}),
-        "nodes": analyze_nodes({"bundle": bundle, "distro": distro}),
-        "pods": analyze_pods({"bundle": bundle, "distro": distro}),
+        "events": analyze_events(bundle, distro),
+        "nodes": analyze_nodes(bundle, distro),
+        "pods": analyze_pods(bundle, distro),
         "note": "Data has been automatically truncated to fit context limits."
     }
 
 # =====================================================
-# Dispatcher
+# MCP PROTOCOL HANDLING (The Fix)
 # =====================================================
-def handle_call(tool, args):
-    mapping = {
-        "read_file": read_file,
-        "list_files": lambda a: {"files": list_all(a.get("bundle", "."))},
-        "auto_diagnose": auto_diagnose,
-    }
-    func = mapping.get(tool)
-    if not func: return {"error": f"Tool '{tool}' not found."}
-    return func(args)
 
-# =====================================================
-# Main Loop
-# =====================================================
-send({"status": "ready"})
-for line in sys.stdin:
-    if not line.strip(): continue
-    try:
-        request = json.loads(line)
-        result = handle_call(request.get("tool"), request.get("arguments", {}))
-        send({"result": result})
-    except Exception as e:
-        send({"error": str(e)})
+TOOLS = [
+    {
+        "name": "auto_diagnose",
+        "description": "PRIMARY TOOL. Runs a full diagnostic scan on the cluster bundle (Nodes, Pods, Events).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bundle": {"type": "string", "description": "Absolute path to bundle root"},
+                "distro": {"type": "string", "description": "k3s or rke2"}
+            },
+            "required": ["bundle"]
+        }
+    },
+    {
+        "name": "read_file",
+        "description": "Reads a specific file from the bundle safely.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bundle": {"type": "string"},
+                "file": {"type": "string", "description": "Relative path to file"}
+            },
+            "required": ["bundle", "file"]
+        }
+    },
+    {
+        "name": "list_files",
+        "description": "Lists files in the bundle.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bundle": {"type": "string"}
+            },
+            "required": ["bundle"]
+        }
+    }
+]
+
+def handle_call_tool(name, args):
+    if name == "auto_diagnose":
+        return auto_diagnose(args.get("bundle", "."), args.get("distro", "k3s"))
+    elif name == "read_file":
+        full_path = os.path.join(args.get("bundle", "."), args.get("file", ""))
+        content = safe_read(full_path)
+        if content is None: return f"Error: File not found: {full_path}"
+        return content
+    elif name == "list_files":
+        return list_all_files(args.get("bundle", "."))
+    raise ValueError(f"Unknown tool: {name}")
+
+def process_request(request):
+    method = request.get("method")
+    msg_id = request.get("id")
+    params = request.get("params", {})
+
+    # Handshake: initialize
+    if method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "rbr-debugger", "version": "1.0"}
+            }
+        }
+    
+    # Handshake: initialized (notification, no response needed)
+    if method == "notifications/initialized":
+        return None
+
+    # Capabilities: tools/list
+    if method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {"tools": TOOLS}
+        }
+
+    # Execution: tools/call
+    if method == "tools/call":
+        try:
+            name = params.get("name")
+            args = params.get("arguments", {})
+            result = handle_call_tool(name, args)
+            return {
+                "jsonrpc": "2.0", 
+                "id": msg_id, 
+                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+            }
+        except Exception as e:
+            return {
+                "jsonrpc": "2.0", 
+                "id": msg_id, 
+                "error": {"code": -32000, "message": str(e)}
+            }
+    
+    # Ping or unknown
+    if method == "ping":
+         return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
+
+    return None
+
+def main():
+    # Read from stdin, write to stdout
+    while True:
+        try:
+            line = sys.stdin.readline()
+            if not line: break
+            
+            request = json.loads(line)
+            response = process_request(request)
+            
+            if response:
+                sys.stdout.write(json.dumps(response) + "\n")
+                sys.stdout.flush()
+                
+        except (json.JSONDecodeError, ValueError):
+            continue
+        except KeyboardInterrupt:
+            break
+
+if __name__ == "__main__":
+    main()
