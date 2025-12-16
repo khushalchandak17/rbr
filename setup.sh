@@ -26,7 +26,7 @@ find_bin_dir() {
       return 0
     fi
   done
-  
+
   # Check paths listed in $PATH
   echo "$PATH" | tr ':' '\n' | while read -r dir; do
     if [[ -d "$dir" && -w "$dir" ]]; then
@@ -34,7 +34,7 @@ find_bin_dir() {
       return 0
     fi
   done
-  
+
   return 1
 }
 
@@ -75,15 +75,31 @@ if ! git clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$RBR_DIR"; then
   exit 1
 fi
 
-# Step 5: Ensure the core script is executable
+# Step 5: Ensure scripts are executable
+echo "Setting executable permissions..."
+
+# 5a. Core CLI script
 CORE_SCRIPT="$RBR_DIR/bin/$TARGET_EXECUTABLE.sh"
 if [ -f "$CORE_SCRIPT" ]; then
-  echo "Setting executable permissions on $CORE_SCRIPT"
   chmod +x "$CORE_SCRIPT"
 else
   echo "Error: Core script $CORE_SCRIPT not found after clone." >&2
   rm -rf "$RBR_DIR"
   exit 1
+fi
+
+# 5b. AI Server script
+if [ -f "$RBR_DIR/ai/cluster_bundle_debugger.py" ]; then
+  chmod +x "$RBR_DIR/ai/cluster_bundle_debugger.py"
+fi
+
+# 5c. Bundled Diagnostic Data scripts
+if [ -f "$RBR_DIR/data/cluster-summary.sh" ]; then
+  chmod +x "$RBR_DIR/data/cluster-summary.sh"
+  # Recursively make lib scripts executable if they exist
+  if [ -d "$RBR_DIR/data/lib" ]; then
+      chmod +x "$RBR_DIR/data/lib/"*.sh
+  fi
 fi
 
 # Step 6: Create a symlink in $PATH
