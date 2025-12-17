@@ -1,0 +1,30 @@
+---
+apiVersion: v1
+data:
+  password: X
+  username: X
+kind: Secret
+metadata:
+  name: auth-x
+  namespace: fleet-default
+---
+apiVersion: fleet.cattle.io/v1alpha1
+kind: GitRepo
+metadata:
+  name: fleet-poc
+  namespace: fleet-default
+spec:
+  branch: main
+  clientSecretName: auth-x
+  correctDrift:
+    enabled: true
+  insecureSkipTLSVerify: false
+  paths:
+    - /deploy
+  repo: >-
+    https://your-repo.git
+  targets:
+    - clusterSelector:
+        matchLabels:
+          poc: deploy
+      name: poc-deploy
