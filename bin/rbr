@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #
 # rbr — Rancher Bundle Reader
-# kubectl-style dispatcher
+# kubectl-style command dispatcher
 #
-# Design goals:
+# Design principles:
 # - rbr is ONLY a router
-# - No AI logic here
-# - No bundle parsing here
-# - Deterministic behavior
+# - No bundle parsing
+# - No diagnostics logic
+# - No AI logic
+# - Deterministic, filesystem-driven
 #
 
 set -euo pipefail
@@ -26,7 +27,7 @@ RBR_ROOT="$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)"
 export RBR_ROOT
 
 # ---------------------------------------------------------
-# Logging helpers (minimal, local to bin/)
+# Minimal logging helpers (router-only)
 # ---------------------------------------------------------
 rbr_err()  { echo "❌ $*" >&2; }
 rbr_warn() { echo "⚠️  $*" >&2; }
@@ -42,22 +43,27 @@ Usage:
   rbr <command> [args...]
   rbr ai <command> [args...]
 
-Core commands (kubectl-style):
+Core commands (bundle-only, deterministic):
+  rbr cs                     Cluster summary
+  rbr network                Network / CNI summary
+  rbr dns                    DNS / CoreDNS summary
   rbr get <resource>         Read resource from bundle
   rbr logs <pod>             Show pod logs
-  rbr describe <resource>   Describe resource (if available)
   rbr ls                     List available resources
-  rbr cs                     Cluster summary (non-AI)
 
 AI commands (explicit namespace):
   rbr ai cs                  AI cluster diagnosis
+  rbr ai network             AI network diagnosis
+  rbr ai dns                 AI DNS troubleshooting
   rbr ai pods                AI pod analysis
   rbr ai logs <pod>          AI log analysis
   rbr ai events              AI events diagnosis
 
 Notes:
 - Run rbr from inside an extracted support bundle
-- AI is NEVER used unless 'ai' is explicitly specified
+- Core commands NEVER use AI
+- AI is used ONLY when 'ai' is explicitly specified
+- rbr performs no validation or parsing itself
 
 EOF
 }
@@ -102,13 +108,14 @@ if [[ ! -f "$SCRIPT" ]]; then
 fi
 
 if [[ ! -x "$SCRIPT" ]]; then
-  rbr_err "Command exists but is not executable: $SCRIPT"
+  rbr_err "Command exists but is not executable:"
+  rbr_err "  $SCRIPT"
   rbr_err "Hint: chmod +x $SCRIPT"
   exit 1
 fi
 
 # ---------------------------------------------------------
-# Execute
+# Execute (no wrappers, no traps)
 # ---------------------------------------------------------
 exec "$SCRIPT" "$@"
 
