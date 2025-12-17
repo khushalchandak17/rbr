@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+#
+# rbr — Rancher Bundle Reader
+# kubectl-style dispatcher
+#
+# Design goals:
+# - rbr is ONLY a router
+# - No AI logic here
+# - No bundle parsing here
+# - Deterministic behavior
+#
+
+set -euo pipefail
+
+# ---------------------------------------------------------
+# Resolve RBR root (handles symlinks)
+# ---------------------------------------------------------
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+
+RBR_ROOT="$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)"
+export RBR_ROOT
+
+# ---------------------------------------------------------
+# Logging helpers (minimal, local to bin/)
+# ---------------------------------------------------------
+rbr_err()  { echo "❌ $*" >&2; }
+rbr_warn() { echo "⚠️  $*" >&2; }
+
+# ---------------------------------------------------------
+# Usage
+# ---------------------------------------------------------
+usage() {
+cat <<EOF
+rbr — Rancher Bundle Reader
+
+Usage:
+  rbr <command> [args...]
+  rbr ai <command> [args...]
+
+Core commands (kubectl-style):
+  rbr get <resource>         Read resource from bundle
+  rbr logs <pod>             Show pod logs
+  rbr describe <resource>   Describe resource (if available)
+  rbr ls                     List available resources
+  rbr cs                     Cluster summary (non-AI)
+
+AI commands (explicit namespace):
+  rbr ai cs                  AI cluster diagnosis
+  rbr ai pods                AI pod analysis
+  rbr ai logs <pod>          AI log analysis
+  rbr ai events              AI events diagnosis
+
+Notes:
+- Run rbr from inside an extracted support bundle
+- AI is NEVER used unless 'ai' is explicitly specified
+
+EOF
+}
+
+# ---------------------------------------------------------
+# No arguments → help
+# ---------------------------------------------------------
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 0
+fi
+
+# ---------------------------------------------------------
+# Command resolution (kubectl-style)
+# ---------------------------------------------------------
+CMD="$1"
+shift || true
+
+if [[ "$CMD" == "ai" ]]; then
+  # AI namespace
+  [[ $# -ge 1 ]] || {
+    rbr_err "Missing AI subcommand"
+    usage
+    exit 1
+  }
+
+  SUBCMD="$1"
+  shift || true
+  SCRIPT="$RBR_ROOT/cmd/ai/$SUBCMD.sh"
+else
+  # Core commands
+  SCRIPT="$RBR_ROOT/cmd/core/$CMD.sh"
+fi
+
+# ---------------------------------------------------------
+# Validate command script
+# ---------------------------------------------------------
+if [[ ! -f "$SCRIPT" ]]; then
+  rbr_err "Unknown command: $CMD"
+  usage
+  exit 1
+fi
+
+if [[ ! -x "$SCRIPT" ]]; then
+  rbr_err "Command exists but is not executable: $SCRIPT"
+  rbr_err "Hint: chmod +x $SCRIPT"
+  exit 1
+fi
+
+# ---------------------------------------------------------
+# Execute
+# ---------------------------------------------------------
+exec "$SCRIPT" "$@"
+
